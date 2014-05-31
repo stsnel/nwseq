@@ -1,0 +1,575 @@
+#!/usr/bin/perl 
+#
+# nwseq is a utility which enumerates network addresses and integers.
+#
+# please use "nwseq --help" for usage information, or consult the man page
+# for examples and additional information.
+#
+# ----
+#
+# The MIT License (MIT)
+# 
+# Copyright (c) 2014 Sietse Snel
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+use bigint;
+use strict;
+use warnings;
+
+my $inputIncrement = "";
+my $inputFirst = "";
+my $inputLast = "";
+my $first = 1;
+my $last = 1;
+my $increment = 1;
+my $width = 0;
+my $equalWidth = 0;
+my $skipNetBroadcast = 1;
+my $addPrefixLength = 0;
+
+my $TYPE_EMPTY   = -2;	# TYPE constant for empty variable ("")
+my $TYPE_UNKNOWN = -1;	# TYPE constant for variables of unknown type
+my $TYPE_DECINT = 0;	# TYPE constant for decimal integers
+my $TYPE_IPV4   = 1;	# TYPE constant for IPv4 addresses
+my $TYPE_IPV4R  = 2;	# TYPE constant for IPv4 range in CIDR-Format
+my $TYPE_IPV4RPL= 3; 	# TYPE constant for IPv4 prefix length (e.g. "/32")
+my $TYPE_MAC48  = 4;	# TYPE constant for MAC addresses (MAC48)
+my $type = $TYPE_DECINT;
+
+my $macformat = -1;
+my $MACFORMAT_IEEEHYPHEN 	= 0;		# e.g. 01-02-03-04-05-06
+my $MACFORMAT_IEEECOLON		= 1;		# e.g. 01:02:03:04:05:06
+my $MACFORMAT_CISCO		= 2;		# e.g. 0102.0304.0506
+
+my $VERSION = "1.00";
+
+my $usage = 
+"
+nwseq enumerates network addresses or decimal integers.
+
+Usage:
+
+nwseq [-w] LASTINTEGER
+nwseq [-w] FIRSTINTEGER [INCREMENT] LASTINTEGER
+nwseq FIRSTMACADDRESS [INCREMENT] LASTMACADDRESS
+nwseq FIRSTIPV4ADDRESS [INCREMENT] LASTIPV4ADDRESS
+nwseq [-i] IPV4RANGE 
+nwseq IPV4RANGE PREFIXLENGTH
+
+Supported options:
+ -i 			Includes the network address and broadcast address of the range in the output
+ -w or --equal-width	Equalizes integer output width by padding numbers with leading zeroes
+ --help			Displays this help message and exits
+ --version		Displays version information and exits
+
+For additional information and examples, please consult the man page.
+";
+
+# Parse command line options
+
+while ( $ARGV[0] eq "-w" or $ARGV[0] eq "--equal-width" or 
+        $ARGV[0] eq "-i" or $ARGV[0] eq "--version" or
+	$ARGV[0] eq "--help" )
+{	if ( $ARGV[0] eq "-w" or $ARGV[0] eq "--equal-width" )
+	{	$equalWidth = 1;
+	}
+	elsif ( $ARGV[0] eq "-i" )
+	{	$skipNetBroadcast = 0;
+	}
+	elsif ( $ARGV[0] eq "--version" )
+	{	print "nwseq version $VERSION\n";
+		exit 0;
+	}
+	elsif ( $ARGV[0] eq "--help" )
+	{	print $usage;
+		exit 0;
+	}
+	shift @ARGV;
+}	
+
+# Parse command line arguments
+
+if ( scalar @ARGV == 0 )
+{	print STDERR "Error: missing argument.\n";
+	exit 1;
+}
+elsif ( scalar @ARGV >= 1 and scalar @ARGV <= 3 )
+{	# The number of arguments is correct
+	$inputLast = $ARGV[scalar @ARGV - 1];		
+	$inputFirst = $ARGV[0] if scalar @ARGV > 1;		
+	$inputIncrement = $ARGV[1] if scalar @ARGV == 3;
+}
+else
+{	print STDERR "Error: too many arguments.\n";
+	exit 1;
+}
+
+# Process command line arguments
+
+my $firstType = getVarType ($inputFirst);
+my $lastType  = getVarType ($inputLast);
+my $incType   = getVarType ($inputIncrement);
+
+if ( $incType == $TYPE_DECINT )
+{	$increment = $inputIncrement;
+}
+elsif ( $incType != $TYPE_EMPTY )
+{	print STDERR "Error: invalid argument \"$inputIncrement\".\n";
+	exit 1;
+}
+
+if ( $firstType == $TYPE_UNKNOWN )
+{	print STDERR "Error: invalid argument \"$inputFirst\".\n";
+	exit 1;
+}
+elsif ( $lastType == $TYPE_UNKNOWN  )
+{	print STDERR "Error: invalid argument \"$inputLast\".\n";
+	exit 1;
+}
+elsif ( $firstType == $lastType )
+{	if ( $firstType == $TYPE_DECINT )
+	{	$first = $inputFirst;
+		$last = $inputLast;
+		$type = $TYPE_DECINT;
+	}
+	elsif ( $firstType == $TYPE_IPV4 )
+	{	$first = convertIPv4AddressInt ($inputFirst);
+		$last  = convertIPv4AddressInt ($inputLast);
+		$type = $TYPE_IPV4;
+	}
+	elsif ( $firstType == $TYPE_MAC48 )
+	{	$first = convertMacaddressInt ($inputFirst);
+		$last  = convertMacaddressInt ($inputLast);
+		$type = $TYPE_MAC48;
+		$macformat = getMacaddressFormat ($inputFirst);
+	}
+	else
+	{	print STDERR "Internal error while handling argument of type " . $lastType . "\n";
+		exit 1;
+	}
+}
+elsif ( $lastType == $TYPE_DECINT and $firstType == $TYPE_EMPTY )
+{	$first = 1;
+	$last = $inputLast;
+	$type = $TYPE_DECINT;
+}
+elsif ( $lastType == $TYPE_IPV4R and $firstType == $TYPE_EMPTY )  
+{	
+	# Note: if nwseq is called with a single argument (an IPv4 Range, in this case), it 
+	# will be stored in $inputLast.
+	$first = getIPv4RangeFirstAddress ($inputLast);
+	$last = getIPv4RangeLastAddress ($inputLast); 
+
+	# Skip network address and broadcast address by default. This does not apply to /31-
+	# and /32-subnets.
+	$first++ if ($last- $first ) > 1 and $skipNetBroadcast;
+	$last-- if ($last - $first ) > 1 and $skipNetBroadcast;
+	$type = $TYPE_IPV4;
+}
+elsif ( $firstType == $TYPE_IPV4R and $lastType == $TYPE_IPV4RPL )
+{	
+	# This argument type cannot be combined with an increment argument
+	if ( $incType != $TYPE_EMPTY )
+	{	print STDERR "Error: cannot enumerate IPv4 address range with a non-default increment value\n";
+		exit 1;
+	}
+
+	# Remove leading slash from $inputLast
+	my $prefixLength = substr ($inputLast,1,length($inputLast-1));
+
+	# Convert range to a sequence of IP addresses, by calculating the first and last address of the
+	# range.
+	$first = getIPv4RangeFirstAddress ($inputFirst);
+	$last = getIPv4RangeLastAddress ($inputFirst);
+	$type = $TYPE_IPV4;
+
+	# Skip network address and broadcast address by default when enumerating
+	# single addresses.
+        $first++ if ($last- $first ) > 1 and $skipNetBroadcast and $prefixLength == 32;
+        $last-- if ($last - $first ) > 1 and $skipNetBroadcast and $prefixLength == 32;
+
+	# Second prefix length should be greater than first prefix length, but not greater than 32
+	if ( $prefixLength >= 0 and $prefixLength <=32 and 
+	     2 ** (32 - $prefixLength ) < ( $last - $first + 2 * $skipNetBroadcast ))
+	{ 	$addPrefixLength = $prefixLength;
+		$increment = 2 ** ( 32 - $prefixLength);
+	}
+	else
+	{	print STDERR "Error: second prefix length should be greater than first prefix length.\n";
+		exit 1;
+	}
+}
+else
+{	print STDERR "Error: this combination of arguments is not supported.\n";
+	exit 1;
+}
+
+# If -w / --equal-width option has been chosen, check if the option is compatible with the command line arguments
+# and calculate output width.
+if ( $type != $TYPE_DECINT and $equalWidth )
+{	print STDERR "Error: option \"-w\"  or \"--equal-width\" can only be used when all arguments are decimal integers.\n";
+	exit 1;
+}
+elsif ( $equalWidth )
+{	$width = length ($first) > length($last) ? length($first) : length($last);
+}
+
+# Enumerate output values
+my $value = $first;
+my $outvalue = "";
+while ( ( ( $increment >= 0 ) and ( $value <= $last ) ) or
+	( ( $increment <  0 ) and ( $value >= $last ) ) )
+{	
+	if ( $type == $TYPE_DECINT and $equalWidth )
+	{	$outvalue = padDecimalInteger ($value,$width);
+	}
+	elsif ( $type == $TYPE_DECINT )
+	{	$outvalue = $value;
+	}
+	elsif ( $type == $TYPE_IPV4 )
+	{	$outvalue = convertIntIPv4Address ($value)	
+			. ( $addPrefixLength ? "/$addPrefixLength" : "") ;
+	}
+	elsif ( $type == $TYPE_MAC48 )
+	{	$outvalue = convertIntMacaddress ($value,$macformat);
+	}
+	else
+	{	print STDERR "Error: cannot print value for type $type.\n";
+		exit 1;
+	}
+	
+	print "$outvalue\n";
+	$value += $increment;
+}
+
+# getVarType: determines type of a variable
+#
+# Argument: scalar variable
+#
+# Returns: value which represents variable type.
+#
+# Possible return values:
+# - $TYPE_EMPTY   	TYPE constant for empty variable ("")
+# - $TYPE_UNKNOWN	TYPE constant for variables of unknown type
+# - $TYPE_DECINT	TYPE constant for decimal integers
+# - $TYPE_IPV4		TYPE constant for IPv4 addresses
+# - $TYPE_IPV4R		TYPE constant for IPv4 range in CIDR-Format
+# - $TYPE_IPV4RPL	TYPE constant for IPv4 prefix length (e.g. "/32")
+# - $TYPE_MAC48		TYPE constant for MAC addresses (MAC48)
+#
+sub getVarType
+{	my ($arg) = @_;
+       	return $TYPE_EMPTY if $arg eq "";
+
+       	# Determine if variable is a decimal integer
+       	if ( $arg =~ /^\-?\d+$/ )
+
+	{	return $TYPE_DECINT;
+	}
+
+	# Determine if variable is in IPv4 address format
+	if ( $arg =~ /^\d+\.\d+\.\d+\.\d+$/ )
+	{	my $octets_ok = 1;
+		foreach my $octet ( split /\./, $arg )
+		{	if ( $octet > 255 )
+			{	$octets_ok = 0;
+				last;
+			}
+		}
+		return $TYPE_IPV4 if $octets_ok;
+	}
+
+	# Determine if variable is IPv4 Range in CIDR-notation
+	if ( $arg =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/ )
+	{	my ($addr,$length) = ($1,$2);
+		return $TYPE_IPV4R 
+			if getVarType ($addr) == $TYPE_IPV4 and
+			   $length >= 0 and
+			   $length <= 32;
+	}
+	
+	# Determine if it could be an IPv4 prefix length
+	if ( $arg =~ /^\/(\d+)$/ )
+	{	my $length = $1;
+		return $TYPE_IPV4RPL if $length >=0 and $length <= 32;
+	}
+
+	# Determine if variable is a MAC address
+	if ( 	$arg =~ /^([\da-f]{1,2}\-){5}[\da-f]{1,2}$/i or
+		$arg =~ /^([\da-f]{1,2}:){5}[\da-f]{1,2}$/i or 
+		$arg =~ /^[\da-f]{4}\.[\da-f]{4}\.[\da-f]{4}$/i )
+	{	return $TYPE_MAC48;
+	}
+
+	# If variable does not match any known format, return $TYPE_UNKNOWN
+	return $TYPE_UNKNOWN;
+}
+
+# getMacaddressFormat: determines format of a MAC address
+#
+# Argument: MAC address
+#
+# Returns: constant which represents MAC address format type
+# 
+# Possible return values:
+# - $MACFORMAT_IEEEHYPHEN        e.g. 01-02-03-04-05-06
+# - $MACFORMAT_IEEECOLON         e.g. 01:02:03:04:05:06
+# - $MACFORMAT_CISCO             e.g. 0102.0304.0506
+#
+# The subroutine exits with an error message if it cannot determine the address format.
+#
+sub getMacaddressFormat
+{	my ($arg) = @_;
+	if ( $arg =~ /^([\da-f]{1,2}\-){5}[\da-f]{1,2}$/i )
+	{	return $MACFORMAT_IEEEHYPHEN;
+	}
+	elsif ( $arg =~ /^([\da-f]{1,2}:){5}[\da-f]{1,2}$/i )
+	{	return $MACFORMAT_IEEECOLON;
+	}
+	elsif ( $arg =~ /^[\da-f]{4}\.[\da-f]{4}\.[\da-f]{4}$/i )
+	{	return $MACFORMAT_CISCO;
+	}
+	else
+	{	print STDERR "Error: unknown MAC address format input \"$arg\".\n";
+		exit 1;
+	}
+}
+
+# convertMacaddressInt: converts a MAC address to a decimal integer value
+#
+# Argument: MAC address
+#
+# Returns: decimal value
+# 
+sub convertMacaddressInt
+{	my ($arg) = @_;
+	my $macformat = getMacaddressFormat($arg);
+	
+	my @parts = split /[\.:\-]/ , $arg;
+	my $result = 0;
+	my $exponent = 0;
+	foreach my $part (reverse @parts)
+	{	my $decpart = hex($part);
+		   $result += $decpart * 2 ** $exponent;
+		if ( $macformat == $MACFORMAT_CISCO ) 
+		{	$exponent += 16;
+		}
+		elsif ( $macformat == $MACFORMAT_IEEEHYPHEN or 
+	        	$macformat == $MACFORMAT_IEEECOLON )
+		{    	$exponent += 8;
+		}
+		else
+		{	print STDERR "Error: unknown MACFORMAT while converting MAC address \"$arg\" to integer.\n";
+			exit 1;
+		}
+	}
+	return $result;	
+}
+
+# convertIntMacaddress: converts a decimal integer value to a MAC address
+#
+# Arguments:
+# 1. Decimal integer
+# 2. MAC address format. Possible values:
+#    - $MACFORMAT_IEEEHYPHEN        = 0;            # e.g. 01-02-03-04-05-06
+#    - $MACFORMAT_IEEECOLON         = 1;            # e.g. 01:02:03:04:05:06
+#    - $MACFORMAT_CISCO             = 2;            # e.g. 0102.0304.0506
+#
+# The subroutine will exit with an error message if it is called with an integer value which cannot
+# be converted to a MAC address, or if the MAC address format is unknown.
+#
+sub convertIntMacaddress 
+{	my ($arg,$macformat) = @_;
+
+	if ( $arg !~ /^\d+$/ or $arg > 2**48-1 )
+	{	print STDERR "Error: cannot convert \"$arg\" to a MAC address.\n";
+		exit 1;
+	}
+ 
+	my $hex = $arg->as_hex();
+	   $hex = substr ($hex,2,length($hex)-2) if substr($hex,0,2) eq "0x";
+	my $result = "";
+
+
+	if ( length ($hex) < 12 )
+	{	$hex = "0" x (12-length($hex)) . $hex;
+	}
+
+	if ( $macformat == $MACFORMAT_CISCO )
+	{	foreach my $pos (0,4,8)
+		{	$result .= substr ($hex,$pos,4) . ".";
+		}
+		$result = substr ($result,0,14);
+	}
+	elsif ( $macformat == $MACFORMAT_IEEEHYPHEN )
+	{	foreach my $pos (0,2,4,6,8,10)
+		{	$result .= substr ($hex,$pos,2) . "-";
+		}
+		$result = substr ($result,0,17);
+	}
+       	elsif ( $macformat == $MACFORMAT_IEEECOLON)
+        {       foreach my $pos (0,2,4,6,8,10)
+                {       $result .= substr ($hex,$pos,2) . ":";
+                }
+                $result = substr ($result,0,17);
+        }
+	else
+	{	print STDERR "Error: unknown MACFORMAT while converting MAC address \"$hex\".\n";
+                        exit 1;
+	}
+}
+
+# convertIPv4AddressInt: converts an IPv4 address to a decimal integer value
+#
+# Argument: IPv4 address
+#
+# Returns: decimal value
+#
+# The subroutine will exit with an error message, if the argument is not a valid IPv4 address.
+#
+sub convertIPv4AddressInt
+{	my ( $input ) = @_;
+
+	if ( $input =~ /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/ )
+	{	if ( $1 > 255 or $2 > 255 or $3 > 255 or $4 > 255 )
+		{	print STDERR "Error while converting IPv4 address $input.\n";
+			exit 1;
+		} 
+		return 	$1* 2**24 +
+			$2* 2**16 +
+			$3* 2**8  +
+			$4
+	}
+	else
+	{	print STDERR "Error: could not process IPv4 address \"$input\".";
+		exit 1;
+	}
+}
+
+# convertIntIPv4Address: converts a decimal integer value to an IPv4 address
+#
+# Argument: integer value
+# 
+# Returns: IPv4 address
+#
+# This subroutine will exit with an error message, if the argument cannot be converted to an IPv4 address.
+#
+sub convertIntIPv4Address
+{	my ( $input ) = @_;
+	
+	if ( $input =~ /^\d+$/ and $input >= 0 and $input <= 2**32 -1 )
+	{	my $o4 = $input % 256;
+		$input = $input >> 8;
+		my $o3 = $input % 256;
+		$input = $input >> 8;
+		my $o2 = $input % 256;
+		$input = $input >> 8;
+		my $o1 = $input;
+
+		if ( $o1 > 255 or $o2 > 255 or $o3 > 255 or $o4 > 255 )
+		{	print STDERR "Error while converting int $input to IPv4 address.\n";
+			exit 1;
+		}
+		else
+		{	return "$o1.$o2.$o3.$o4";
+		}
+	}
+	else
+	{	print STDERR "Error: convertIntIPv4Address received invalid input \"$input\".";
+		exit 1;
+	}
+}
+
+# padDecimalInteger: pads a decimal integer with leading zeroes, in order to equalize output width
+# 
+# Arguments:
+# 1. Integer value
+# 2. Output width
+#
+# Returns: padded integer value
+#
+# This subroutine does not change the input value if the specified width is less than or equal to the 
+# width of the input value.
+#
+sub padDecimalInteger
+{	my ($input,$width) = @_;
+	if ( length ($input) <  $width )
+	{ 	my $padding = "0" x ($width-length($input));
+                return $input < 0 ?
+                        "-" . $padding . substr($input,1,length($input-1)) :
+                        $padding . $input ;
+	}
+	else
+	{	return $input;
+	}
+}
+
+# getIPv4RangeFirstAddress: returns the first address of an IPv4 subnet. This is usually
+# the network address (/31 and /32 subnets are an exception).
+#
+# Argument: IPv4 subnet, in CIDR notation. For instance:"10.11.12.0/24".
+#
+# Return value: first address / network address
+#
+# This subroutine will exit with an error message if the argument is not a valid IPv4 subnet.
+#
+sub getIPv4RangeFirstAddress
+{	my ($arg) =@_;
+	if ( $arg =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/ )
+	{	my ($addr,$length) = ($1,$2);
+		my $result = convertIPv4AddressInt ($addr);
+		   $result = $result >> (32 - $length);
+		   $result = $result << (32 - $length);
+	 	return $result;
+	}
+	else
+	{	print STDERR "Error: cannot determine first address for IPv4-range \"$arg\".\n";
+		exit 1;
+	}
+}
+
+# getIPv4RangeLastAddress: returns the last address of an IPv4 subnet. This is usually
+# the broadcast address (/31 and /32 subnets are an exception).
+#
+# Argument: IPv4 subnet, in CIDR notation. For instance: "10.11.12.0/24".
+#
+# Return value: last address / broadcast address
+#
+# This subroutine will exit with an error message if the argument is not a valid IPv4 subnet.
+#
+sub getIPv4RangeLastAddress
+{       my ($arg) =@_;
+        if ( $arg =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/ )
+        {       my ($addr,$length) = ($1,$2);
+		if ( $length > 32 )
+		{	print STDERR "Error: specified prefix length for \"$arg\" is invalid.\n";
+			exit 1;
+		}
+                my $result = convertIPv4AddressInt ($addr);
+                   $result = $result >> ( 32 - $length);
+                   $result = $result << ( 32 - $length);
+		   $result += 2**(32-$length) -1;
+                return $result;
+        }
+        else
+        {       print STDERR "Error: cannot determine last address for IPv4-range \"$arg\".\n";
+                exit 1;
+        }
+}

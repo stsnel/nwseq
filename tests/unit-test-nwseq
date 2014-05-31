@@ -1,0 +1,65 @@
+#!/usr/bin/perl
+#
+# This script runs unit tests on nwseq by comparing its output for certain command line arguments 
+# to reference output files.
+#
+
+use strict;
+use warnings;
+
+use File::Compare;
+use Test::Simple tests => 25;
+
+my %testargs = 
+	(	1	=>	"10",
+		2	=>	"1 2 10",
+		3	=>	"10 1",
+		4	=>	"10 -1 1",
+		5	=>	"10 -2 1",
+		6	=>	"-w 10",
+		7	=>	"-w 1 010",
+		8	=>	"-w 001 1 10",
+		9	=>	"-w -10 1",
+		10	=>	"-w -1 -1 -10",
+		11	=>	"2 2 10",
+		12	=>	"10.0.0.1 10.0.0.10",
+		13	=>	"10.0.0.250 10.0.1.5",
+		14	=>	"10.0.0.1 2 10.0.0.10",
+		15	=>	"10.0.1.5 -1 10.0.0.250",
+		16 	=>	"01:00:01:00:01:00 01:00:01:00:01:10",
+		17	=>	"12-34-12-34-12-ff 12-34-12-34-13-01",
+		18	=>	"1234.1234.1230 1234.1234.123F",
+		19	=>	"1234.1234.1235 -1 1234.1234.1230",
+		20	=>	"01:00:01:00:01:00 0100.0100.0110",
+		21	=>	"0100.0100.0100 2 0100.0100.0110",
+		22	=>	"01:00:1:0:01:00 01:00:01:00:01:10",
+		23 	=>	"10.0.0.0/29",
+		24	=>	"10.0.0.0/24 /29",
+		25	=>	"-i 10.0.0.0/29"
+		);
+
+my $nwseq = "../nwseq";
+
+if ( ! -f $nwseq )
+{	print STDERR "Error: cannot find nwseq.\n";
+	exit 1;
+}
+elsif ( ! -x $nwseq  )
+{	print STDERR "Error: nwseq is not an executable file.\n";
+	exit 1;
+}
+
+for my $testno (1 .. 25)
+{	unlink "$testno.output" if ( -f "$testno.output" );
+	if ( -f "$testno.output" )
+	{	print STDERR "Tests aborted: cannot remove old outputfile $testno.output\n";
+		exit 1;
+	}
+	if ( ! -f "$testno.ref" )
+	{	print STDERR "Tests aborted: cannot find reference output for test $testno.\n";
+		exit 1;
+	}
+	system ( "$nwseq " . $testargs{$testno} . " > $testno.output" );
+	my $result = compare("$testno.output","$testno.ref");
+	ok ($result == 0, "Test for input \"" . $testargs{$testno} . "\". Compare result is: $result") ;
+}
