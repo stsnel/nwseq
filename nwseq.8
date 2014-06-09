@@ -1,50 +1,70 @@
 .TH nwseq 8 "May 31st, 2014"
 
 .SH NAME
-nwseq - enumerates network addresses and integers. 
+nwseq - prints a sequence of network addresses or integers. 
 
 .SH SYNOPSIS
 
 .B nwseq
-[-w] LASTINTEGER
+[-w] [-x] LASTINTEGER
 .br
 .B nwseq
-[-w] FIRSTINTEGER [INCREMENT] LASTINTEGER
+[-w] [-x] FIRSTINTEGER [INCREMENT] LASTINTEGER
 .br
 .B nwseq
-FIRSTMACADDRESS [INCREMENT] LASTMACADDRESS
+[-x] FIRSTMACADDRESS [INCREMENT] LASTMACADDRESS
 .br
 .B nwseq
-FIRSTIPV4ADDRESS [INCREMENT] LASTIPV4ADDRESS
+[-x] FIRSTIPV4ADDRESS [INCREMENT] LASTIPV4ADDRESS
+.br
+.B nwseq
+[-n] [-x] [-z] FIRSTIPV6ADDRESS [INCREMENT] LASTIPV6ADDRESS
 .br
 .B nwseq
 [-i] IPV4RANGE 
 .br
 .B nwseq
+[-i] IPV6RANGE
+.br
+.B nwseq
 IPV4RANGE PREFIXLENGTH
 .br
+.B nwseq
+IPV6PREFIX PREFIXLENGTH
 
 .SH DESCRIPTION
 
 nwseq prints a sequence of values (from FIRST to LAST, in steps of INCREMENT). The currently supported value types are: decimal integers, 
-MAC addresses and IPv4 addresses. 
+hexadecimal integers, MAC addresses, IPv4 addresses and IPv6 addresses.
 
 MAC addresses should be in IEEE 802.3 format (e.g. 12-34-12-34-12-34 or 12:34:12:34:12:34) or 
 in Cisco format (e.g. 1234.1234.1234). 
 
-nwseq can also print all addresses in an IPv4 subnet, or print a list of subnets with a specified prefix length within a larger IPv4 subnet. Subnets should be in CIDR notation (e.g. 10.11.12.0/24). 
+nwseq can also print all addresses in an IPv4/IPv6 subnet, or print a list of subnets with a specified prefix length within a larger IPv4/IPv6 subnet. Subnets should be in CIDR notation (e.g. 10.11.12.0/24). 
 
 .SS OPTIONS
 
 Supported options:
 .TP
-\fB \-i \fP
-Includes the network address and the broadcast address of the subnet in the output. This option can only be used on IPv4 subnets.
+\fB \-i \fP or \fB--include-nb \fP
+Includes the network address and (for IPv4 subnets) the broadcast address of the subnet in the output. This option can only be used on IPv4 or IPv6 subnets. 
 
 .TP
-\fB \-w \fP  or \fB --equal-width \fP
+\fB -n \fP or \fB--no-compress \fP
+Do not compress IPv6 addresses. This option can only be used in combination with IPv6 addresses or IPv6 subnets
+
+.TP
+\fB \-w \fP  or \fB--equal-width \fP
 Equalizes output width by padding numbers with leading zeroes. This option can only be used in combination
-with decimal integer command line arguments.
+with decimal or hexadecimal integer command line arguments.
+
+.TP
+\fB \-x \fP or \fB--hexadecimal \fP
+All numerical arguments are hexadecimal numbers. If this option is not specified, nwseq cannot process hexadecimal numerical arguments.
+
+.TP
+\fB \-z \fP or \fB--leading-zero \fP
+Adds leading zeroes to IPv6 addresses.
 
 .TP
 .BI \-\-help
@@ -58,11 +78,15 @@ Displays version information and exits
 
 .TP
 \fBnwseq 10\fP
-Prints all numbers from 1 to 10
+Prints all numbers from 1 to 10 (decimal)
+
+.TP
+\fBnwseq -x 10\fP
+Prints all numbers from 1 to 10 (hexadecimal)
 
 .TP
 \fBnwseq -w 90 110\fP
-Prints all numbers from 90 to 110, with equal width output
+Prints all numbers from 90 to 110 (decimal), with equal width output
 
 .TP
 \fBnwseq 10.0.0.250 10.0.1.10\fP
@@ -80,6 +104,18 @@ the broadcast address
 .TP
 \fBnwseq 10.0.0.0/24 /29\fP
 Prints all /29-subnets within IPv4 subnet 10.0.0.0/24
+
+.TP 
+\fBnwseq 2001:1234:5678::1 2001:1234:5678::10\fP
+Prints all IPv6 addresses from 2001:1234:5678::1 to 2001:1234:5678::10
+
+.TP
+\fBnwseq 2001:1234:5678::/48 /50\fP
+Prints all /50-subnets within IPv6 prefix 2001:1234:5678::/48.
+
+.TP
+\fBnwseq 2001:1234:5678::/125\fP
+Prints all IPv6 addresses in prefix 2001:1234:5678::/125.
 
 .SH COPYRIGHT
 

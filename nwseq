@@ -33,24 +33,35 @@ use bigint;
 use strict;
 use warnings;
 
+use Getopt::Long;
+use Math::BigInt;
+
 my $inputIncrement = "";
 my $inputFirst = "";
 my $inputLast = "";
 my $first = 1;
 my $last = 1;
 my $increment = 1;
+
 my $width = 0;
 my $equalWidth = 0;
 my $skipNetBroadcast = 1;
 my $addPrefixLength = 0;
+my $ipv6LeadingZeroOption = 0;
+my $ipv6NoCompressionOption = 0;
+my $hexadecimalArguments = 0;
 
 my $TYPE_EMPTY   = -2;	# TYPE constant for empty variable ("")
 my $TYPE_UNKNOWN = -1;	# TYPE constant for variables of unknown type
-my $TYPE_DECINT = 0;	# TYPE constant for decimal integers
+my $TYPE_DECINT = 0;	# TYPE constant for decimal integers (or hexadecimal integers without letters)
 my $TYPE_IPV4   = 1;	# TYPE constant for IPv4 addresses
-my $TYPE_IPV4R  = 2;	# TYPE constant for IPv4 range in CIDR-Format
-my $TYPE_IPV4RPL= 3; 	# TYPE constant for IPv4 prefix length (e.g. "/32")
+my $TYPE_IPV4R  = 2;	# TYPE constant for IPv4 ranges in CIDR-Format
+my $TYPE_IPPL = 3; 	# TYPE constant for IPv4 or IPv6 prefix length (e.g. "/32")
 my $TYPE_MAC48  = 4;	# TYPE constant for MAC addresses (MAC48)
+my $TYPE_HEXINT = 5;	# TYPE constant for hexadecimal integers (note that hexadecimal integers without
+			# letters will be recognized as $TYPE_DECINT)
+my $TYPE_IPV6   = 6;	# TYPE constant for IPv6 addresses
+my $TYPE_IPV6R	= 7;	# TYPE constant for IPv6 ranges
 my $type = $TYPE_DECINT;
 
 my $macformat = -1;
@@ -58,7 +69,7 @@ my $MACFORMAT_IEEEHYPHEN 	= 0;		# e.g. 01-02-03-04-05-06
 my $MACFORMAT_IEEECOLON		= 1;		# e.g. 01:02:03:04:05:06
 my $MACFORMAT_CISCO		= 2;		# e.g. 0102.0304.0506
 
-my $VERSION = "1.00";
+my $VERSION = "1.10";
 
 my $usage = 
 "
@@ -66,43 +77,60 @@ nwseq enumerates network addresses or decimal integers.
 
 Usage:
 
-nwseq [-w] LASTINTEGER
-nwseq [-w] FIRSTINTEGER [INCREMENT] LASTINTEGER
-nwseq FIRSTMACADDRESS [INCREMENT] LASTMACADDRESS
-nwseq FIRSTIPV4ADDRESS [INCREMENT] LASTIPV4ADDRESS
+nwseq [-w] [-x] LASTINTEGER
+nwseq [-w] [-x] FIRSTINTEGER [INCREMENT] LASTINTEGER
+nwseq [-x] FIRSTMACADDRESS [INCREMENT] LASTMACADDRESS
+nwseq [-x] FIRSTIPV4ADDRESS [INCREMENT] LASTIPV4ADDRESS
+nwseq [-n] [-x] [-z] FIRSTIPV6ADDRESS [INCREMENT] LASTIPV6ADDRESS
 nwseq [-i] IPV4RANGE 
+nwseq [-i] IPV6RANGE
 nwseq IPV4RANGE PREFIXLENGTH
+nwseq IPV6RANGE PREFIXLENGTH
 
 Supported options:
- -i 			Includes the network address and broadcast address of the range in the output
+ -i or --include-nb	Includes the network address and broadcast address of the range in the output
+ -n or --no-compress	Do not compress (substitute with \"::\") zero groups of IPv6 addresses
  -w or --equal-width	Equalizes integer output width by padding numbers with leading zeroes
- --help			Displays this help message and exits
- --version		Displays version information and exits
+ -x or --hexadecimal	Integer arguments are hexadecimal
+ -z or --leading-zero	Print leading zeroes of IPv6 addresses
+ --help			Displays this help message
+ --version		Displays version information
 
 For additional information and examples, please consult the man page.
 ";
 
 # Parse command line options
 
-while ( $ARGV[0] eq "-w" or $ARGV[0] eq "--equal-width" or 
-        $ARGV[0] eq "-i" or $ARGV[0] eq "--version" or
-	$ARGV[0] eq "--help" )
-{	if ( $ARGV[0] eq "-w" or $ARGV[0] eq "--equal-width" )
-	{	$equalWidth = 1;
-	}
-	elsif ( $ARGV[0] eq "-i" )
-	{	$skipNetBroadcast = 0;
-	}
-	elsif ( $ARGV[0] eq "--version" )
-	{	print "nwseq version $VERSION\n";
-		exit 0;
-	}
-	elsif ( $ARGV[0] eq "--help" )
-	{	print $usage;
-		exit 0;
-	}
-	shift @ARGV;
-}	
+my $versionOption = 0;
+my $usageOption = 0;
+my $includeNetBroadcast = 0;
+my $optionParser = Getopt::Long::Parser->new();
+   $optionParser->configure 
+	(qw(no_ignore_case no_auto_abbrev bundling require_order pass_through));
+
+$optionParser->getoptions 
+	(	'help'		=>	\$usageOption,
+		'version'	=>	\$versionOption,
+		'w|equal-width'	=>	\$equalWidth, 
+		'i|include-nb'	=>	\$includeNetBroadcast,
+		'x|hexadecimal'	=>	\$hexadecimalArguments,
+		'n|no-compress' =>	\$ipv6NoCompressionOption,
+		'z|leading-zero'=>	\$ipv6LeadingZeroOption );
+
+# Set variable $skipNetBroadcast, unless option "-i" has been chosen
+$skipNetBroadcast = 1 - $includeNetBroadcast;  
+
+# Show help message or version information, if requested.
+
+if ( $usageOption )
+{	print $usage;
+	exit 0;
+}
+
+if ( $versionOption )
+{	print "nwseq version $VERSION\n";
+	exit 0;
+}
 
 # Parse command line arguments
 
@@ -127,8 +155,11 @@ my $firstType = getVarType ($inputFirst);
 my $lastType  = getVarType ($inputLast);
 my $incType   = getVarType ($inputIncrement);
 
-if ( $incType == $TYPE_DECINT )
+if ( $incType == $TYPE_DECINT and ! $hexadecimalArguments )
 {	$increment = $inputIncrement;
+}
+elsif ( $hexadecimalArguments and ( $incType == $TYPE_DECINT or $incType == $TYPE_HEXINT ))
+{	$increment = convertHexadecimalDecimal ($inputIncrement);
 }
 elsif ( $incType != $TYPE_EMPTY )
 {	print STDERR "Error: invalid argument \"$inputIncrement\".\n";
@@ -143,16 +174,25 @@ elsif ( $lastType == $TYPE_UNKNOWN  )
 {	print STDERR "Error: invalid argument \"$inputLast\".\n";
 	exit 1;
 }
-elsif ( $firstType == $lastType )
-{	if ( $firstType == $TYPE_DECINT )
-	{	$first = $inputFirst;
-		$last = $inputLast;
-		$type = $TYPE_DECINT;
+elsif ( ( $firstType == $lastType and $firstType != $TYPE_HEXINT ) or
+	( $hexadecimalArguments and
+		( $firstType == $TYPE_DECINT or $firstType == $TYPE_HEXINT ) and
+		( $lastType == $TYPE_DECINT or $lastType == $TYPE_HEXINT )
+	) )
+{	if ( $firstType == $TYPE_DECINT or ( $hexadecimalArguments and $firstType == $TYPE_HEXINT ) )
+	{	$first = $hexadecimalArguments ? convertHexadecimalDecimal ($inputFirst) : $inputFirst;
+		$last = $hexadecimalArguments ? convertHexadecimalDecimal ($inputLast)   : $inputLast;
+		$type = $hexadecimalArguments ? $TYPE_HEXINT : $TYPE_DECINT;
 	}
 	elsif ( $firstType == $TYPE_IPV4 )
 	{	$first = convertIPv4AddressInt ($inputFirst);
 		$last  = convertIPv4AddressInt ($inputLast);
 		$type = $TYPE_IPV4;
+	}
+	elsif ( $firstType == $TYPE_IPV6 )
+	{	$first = convertIPv6AddressInt ($inputFirst);
+		$last  = convertIPv6AddressInt ($inputLast);
+		$type = $TYPE_IPV6;
 	}
 	elsif ( $firstType == $TYPE_MAC48 )
 	{	$first = convertMacaddressInt ($inputFirst);
@@ -165,10 +205,15 @@ elsif ( $firstType == $lastType )
 		exit 1;
 	}
 }
-elsif ( $lastType == $TYPE_DECINT and $firstType == $TYPE_EMPTY )
+elsif ( $lastType == $TYPE_DECINT and $firstType == $TYPE_EMPTY and ! $hexadecimalArguments )
 {	$first = 1;
 	$last = $inputLast;
 	$type = $TYPE_DECINT;
+}
+elsif ( $hexadecimalArguments and $firstType == $TYPE_EMPTY and ( $lastType == $TYPE_DECINT or $lastType == $TYPE_HEXINT ) )
+{	$first = 1;
+	$last = convertHexadecimalDecimal ($inputLast);
+	$type = $TYPE_HEXINT;
 }
 elsif ( $lastType == $TYPE_IPV4R and $firstType == $TYPE_EMPTY )  
 {	
@@ -183,16 +228,34 @@ elsif ( $lastType == $TYPE_IPV4R and $firstType == $TYPE_EMPTY )
 	$last-- if ($last - $first ) > 1 and $skipNetBroadcast;
 	$type = $TYPE_IPV4;
 }
-elsif ( $firstType == $TYPE_IPV4R and $lastType == $TYPE_IPV4RPL )
+elsif ( $lastType == $TYPE_IPV6R and $firstType == $TYPE_EMPTY )
+{       
+	# Note: if nwseq is called with a single argument (an IPv6 Range, in this case), it
+        # will be stored in $inputLast.
+        $first = getIPv6RangeFirstAddress ($inputLast);
+        $last = getIPv6RangeLastAddress ($inputLast);
+
+        # Skip network address by default. This does not apply to /127
+        # and /128-subnets.
+        $first++ if ($last- $first ) > 1 and $skipNetBroadcast;
+        $type = $TYPE_IPV6;
+}
+elsif ( $firstType == $TYPE_IPV4R and $lastType == $TYPE_IPPL )
 {	
 	# This argument type cannot be combined with an increment argument
 	if ( $incType != $TYPE_EMPTY )
-	{	print STDERR "Error: cannot enumerate IPv4 address range with a non-default increment value\n";
+	{	print STDERR "Error: cannot enumerate IPv4 ranges with a non-default increment value\n";
 		exit 1;
 	}
 
 	# Remove leading slash from $inputLast
 	my $prefixLength = substr ($inputLast,1,length($inputLast-1));
+
+	# Check if prefix length is valid for IPv4 addresses
+	if ( $prefixLength < 0 or $prefixLength > 32 )
+	{	print STDERR "Error: invalid prefix length \"$prefixLength\".\n";
+		exit 1;
+	}
 
 	# Convert range to a sequence of IP addresses, by calculating the first and last address of the
 	# range.
@@ -216,6 +279,43 @@ elsif ( $firstType == $TYPE_IPV4R and $lastType == $TYPE_IPV4RPL )
 		exit 1;
 	}
 }
+elsif ( $firstType == $TYPE_IPV6R and $lastType == $TYPE_IPPL )
+{
+        # This argument type cannot be combined with an increment argument
+        if ( $incType != $TYPE_EMPTY )
+        {       print STDERR "Error: cannot enumerate IPv6 ranges with a non-default increment value\n";
+                exit 1;
+        }
+
+        # Remove leading slash from $inputLast
+        my $prefixLength = substr ($inputLast,1,length($inputLast-1));
+
+        # Check if prefix length is valid for IPv6 addresses
+        if ( $prefixLength < 0 or $prefixLength > 128 )
+        {       print STDERR "Error: invalid prefix length \"$prefixLength\".\n";
+                exit 1;
+        }
+
+        # Convert range to a sequence of IP addresses, by calculating the first and last address of the
+        # range.
+        $first = getIPv6RangeFirstAddress ($inputFirst);
+        $last = getIPv6RangeLastAddress ($inputFirst);
+        $type = $TYPE_IPV6;
+
+        # Skip network address by default when enumerating single addresses.
+        $first++ if ($last- $first ) > 1 and $skipNetBroadcast and $prefixLength == 32;
+
+        # Second prefix length should be greater than first prefix length, but not greater than 32
+        if ( $prefixLength >= 0 and $prefixLength <=128 and
+             2 ** (128 - $prefixLength ) < ( $last - $first + $skipNetBroadcast ))
+        {       $addPrefixLength = $prefixLength;
+                $increment = 2 ** ( 128 - $prefixLength);
+        }
+        else
+        {       print STDERR "Error: second prefix length should be greater than first prefix length.\n";
+                exit 1;
+        }
+}
 else
 {	print STDERR "Error: this combination of arguments is not supported.\n";
 	exit 1;
@@ -223,12 +323,32 @@ else
 
 # If -w / --equal-width option has been chosen, check if the option is compatible with the command line arguments
 # and calculate output width.
-if ( $type != $TYPE_DECINT and $equalWidth )
+if ( $type != $TYPE_DECINT and $type != $TYPE_HEXINT and $equalWidth )
 {	print STDERR "Error: option \"-w\"  or \"--equal-width\" can only be used when all arguments are decimal integers.\n";
 	exit 1;
 }
 elsif ( $equalWidth )
 {	$width = length ($first) > length($last) ? length($first) : length($last);
+}
+
+# If -z / --leading-zero option has been chosen, check if option is compatible with the command line arguments.
+if ( $type != $TYPE_IPV6 and $type != $TYPE_IPV6R and $ipv6LeadingZeroOption )
+{	print STDERR "Error: option \"-z\" or \"--leading-zero\" can only be used in combination with IPv6 addresses or ranges.\n";
+	exit 1;
+}
+
+# If -n / --no-compress option has been chosen, check if option is compatible with the command line arguments.
+if ( $type != $TYPE_IPV6 and $type != $TYPE_IPV6R and $ipv6NoCompressionOption )
+{	print STDERR "Error: option \"-n\" or \"--no-compress\" can only be used in combination with IPv6 addresses or ranges.\n";
+	exit 1;
+}
+
+# If -i / --include-nb option has been chosen, check if the option is compatible with the command line arguments.
+if ( $includeNetBroadcast and !
+	( ( $lastType == $TYPE_IPV4R or $lastType == $TYPE_IPV6R ) and
+	  ( $firstType == $TYPE_EMPTY ) ) )
+{	print STDERR "Error: option \"-i\" or \"include-nb\" can only be used in combination with IPv4 or IPv6 ranges.\n";
+	exit 1;
 }
 
 # Enumerate output values
@@ -237,15 +357,28 @@ my $outvalue = "";
 while ( ( ( $increment >= 0 ) and ( $value <= $last ) ) or
 	( ( $increment <  0 ) and ( $value >= $last ) ) )
 {	
-	if ( $type == $TYPE_DECINT and $equalWidth )
-	{	$outvalue = padDecimalInteger ($value,$width);
-	}
-	elsif ( $type == $TYPE_DECINT )
+	if ( $type == $TYPE_DECINT )
 	{	$outvalue = $value;
+		$outvalue = padInteger ($outvalue,$width) if $equalWidth;
+	}
+	elsif ( $type == $TYPE_HEXINT )
+	{	$outvalue = convertDecimalHexadecimal ($value);
+		$outvalue = padInteger ($outvalue,$width) if $equalWidth;
 	}
 	elsif ( $type == $TYPE_IPV4 )
 	{	$outvalue = convertIntIPv4Address ($value)	
-			. ( $addPrefixLength ? "/$addPrefixLength" : "") ;
+			. ( $addPrefixLength ? "/$addPrefixLength" : "" ) ;
+	}
+	elsif ( $type == $TYPE_IPV6 )
+	{	$outvalue = convertIntIPv6Address 
+			($value,
+			 $ipv6NoCompressionOption,
+			 $ipv6LeadingZeroOption,
+			 ( $inputFirst =~ /:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d+)?$/ or
+			   ( $firstType == $TYPE_EMPTY and 
+			     $inputLast =~ /:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(\/\d+)?$/ ) )
+				? 1 : 0 )
+			. ( $addPrefixLength ? "/$addPrefixLength" : "" ) ;
 	}
 	elsif ( $type == $TYPE_MAC48 )
 	{	$outvalue = convertIntMacaddress ($value,$macformat);
@@ -268,11 +401,15 @@ while ( ( ( $increment >= 0 ) and ( $value <= $last ) ) or
 # Possible return values:
 # - $TYPE_EMPTY   	TYPE constant for empty variable ("")
 # - $TYPE_UNKNOWN	TYPE constant for variables of unknown type
-# - $TYPE_DECINT	TYPE constant for decimal integers
+# - $TYPE_DECINT	TYPE constant for decimal integers (or hexadecimal integers without letters)
 # - $TYPE_IPV4		TYPE constant for IPv4 addresses
-# - $TYPE_IPV4R		TYPE constant for IPv4 range in CIDR-Format
-# - $TYPE_IPV4RPL	TYPE constant for IPv4 prefix length (e.g. "/32")
+# - $TYPE_IPV4R		TYPE constant for IPv4 ranges in CIDR-Format
+# - $TYPE_IPPL		TYPE constant for IPv4 or IPv6 prefix length (e.g. "/32")
 # - $TYPE_MAC48		TYPE constant for MAC addresses (MAC48)
+# - $TYPE_HEXINT 	TYPE constant for hexadecimal integers (note that hexadecimal integers without
+#                       letters will be recognized as $TYPE_DECINT)
+# - $TYPE_IPV6		TYPE constant for IPv6 addresses
+# - $TYPE_IPV6R		TYPE constant for IPv6 ranges
 #
 sub getVarType
 {	my ($arg) = @_;
@@ -280,8 +417,12 @@ sub getVarType
 
        	# Determine if variable is a decimal integer
        	if ( $arg =~ /^\-?\d+$/ )
-
 	{	return $TYPE_DECINT;
+	}
+
+	# Determine if variable is a hexadecimal integer
+	if ( $arg =~ /^\-?[\da-f]+$/i )
+	{	return $TYPE_HEXINT;
 	}
 
 	# Determine if variable is in IPv4 address format
@@ -296,19 +437,79 @@ sub getVarType
 		return $TYPE_IPV4 if $octets_ok;
 	}
 
+	# Determine if variable is in IPv6 address format
+	if ( $arg =~ /^[\da-f:]{2,39}$/i or
+	     $arg =~ /^[\da-f:]{2,29}:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/i )
+	{	my $ipv6Tmp = $arg;
+		my $ddIndex = index ( $ipv6Tmp , "::");
+
+		# Convert last part from IPv4 notation to normal IPv6 notation, if necessary.
+		if ( $ipv6Tmp =~  /^([\da-f:]{2,29}):(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i )
+		{	my ($ipv6Part,$ipv4Part) = ($1,$2);
+			goto noipv6address unless getVarType ($ipv4Part) == $TYPE_IPV4;
+			my $ipv4Dec = convertIPv4AddressInt ($ipv4Part);
+ 			   $ipv6Tmp = $ipv6Part . ":" . convertDecimalHexadecimal 
+							( $ipv4Dec >> 16  )
+						. ":" . convertDecimalHexadecimal 
+							( $ipv4Dec - ( $ipv4Dec >> 16 << 16 ));
+		}
+				
+		# Process "::" compression
+		if ( $ddIndex >= 0 )
+		{	# If variable has more than one instance of "::" , it is not
+			# a valid IPv6 address.
+			my $dd2Index = index ($ipv6Tmp, "::", $ddIndex+1 );
+			goto noipv6address if $dd2Index >= 0;
+
+			# Calculate and check number of non-empty groups in address
+			my $nonEmptyGroups = scalar 
+				( grep /[\da-fA-F]+/, ( split /:{1,2}/ , $ipv6Tmp ) );
+			goto noipv6adress if $nonEmptyGroups > 7;
+
+			# Expand "::" to zero groups
+			my $repGroup = "0:" x ( 8 - $nonEmptyGroups ) ;
+ 			   $repGroup = substr ($repGroup,0,length($repGroup) - 1 )
+				if $ddIndex == length($ipv6Tmp) - 2;
+			   $repGroup = ":$repGroup"
+				unless $ddIndex == 0;
+			$ipv6Tmp =~ s/::/$repGroup/;
+		}
+
+		# Check number and content of groups
+		my @ipv6GroupsTmp = split /:/, $ipv6Tmp;
+		goto noipv6address if scalar @ipv6GroupsTmp != 8;
+		foreach my $ipv6GroupTmp (@ipv6GroupsTmp)
+		{	goto noipv6address if $ipv6GroupTmp !~ /^[\da-f]{1,4}$/i;
+		}
+
+		# If all checks passed, the input value is a valid IPv6 address
+		return $TYPE_IPV6;
+	}
+	noipv6address:
+
 	# Determine if variable is IPv4 Range in CIDR-notation
 	if ( $arg =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/ )
 	{	my ($addr,$length) = ($1,$2);
 		return $TYPE_IPV4R 
 			if getVarType ($addr) == $TYPE_IPV4 and
-			   $length >= 0 and
-			   $length <= 32;
+			   	$length >= 0 and
+			   	$length <= 32;
+	}
+
+	# Determine if variable is IPv6 Range
+	if ( $arg =~ /^([\da-f:]{2,39})\/(\d{1,3})$/i or
+             $arg =~ /^([\da-f:]{2,29}:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,3})$/i  )
+	{	my ($addr,$length) = ($1,$2);
+		return $TYPE_IPV6R
+			if getVarType ($addr) == $TYPE_IPV6 and
+				$length >= 0 and
+				$length <= 128;
 	}
 	
-	# Determine if it could be an IPv4 prefix length
+	# Determine if it could be an IP prefix length
 	if ( $arg =~ /^\/(\d+)$/ )
 	{	my $length = $1;
-		return $TYPE_IPV4RPL if $length >=0 and $length <= 32;
+		return $TYPE_IPPL if $length >=0 and $length <= 128;
 	}
 
 	# Determine if variable is a MAC address
@@ -497,7 +698,7 @@ sub convertIntIPv4Address
 	}
 }
 
-# padDecimalInteger: pads a decimal integer with leading zeroes, in order to equalize output width
+# padInteger: pads a decimal or hexadecimal integer value with leading zeroes, in order to equalize output width
 # 
 # Arguments:
 # 1. Integer value
@@ -508,11 +709,11 @@ sub convertIntIPv4Address
 # This subroutine does not change the input value if the specified width is less than or equal to the 
 # width of the input value.
 #
-sub padDecimalInteger
+sub padInteger
 {	my ($input,$width) = @_;
 	if ( length ($input) <  $width )
 	{ 	my $padding = "0" x ($width-length($input));
-                return $input < 0 ?
+                return substr ($input,0,1) eq "-" ?
                         "-" . $padding . substr($input,1,length($input-1)) :
                         $padding . $input ;
 	}
@@ -526,12 +727,12 @@ sub padDecimalInteger
 #
 # Argument: IPv4 subnet, in CIDR notation. For instance:"10.11.12.0/24".
 #
-# Return value: first address / network address
+# Returns: first address / network address (as decimal integer value)
 #
 # This subroutine will exit with an error message if the argument is not a valid IPv4 subnet.
 #
 sub getIPv4RangeFirstAddress
-{	my ($arg) =@_;
+{	my ($arg) = @_;
 	if ( $arg =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/ )
 	{	my ($addr,$length) = ($1,$2);
 		my $result = convertIPv4AddressInt ($addr);
@@ -540,7 +741,31 @@ sub getIPv4RangeFirstAddress
 	 	return $result;
 	}
 	else
-	{	print STDERR "Error: cannot determine first address for IPv4-range \"$arg\".\n";
+	{	print STDERR "Error: cannot determine first address for IPv4 range \"$arg\". Not a valid range.\n";
+		exit 1;
+	}
+}
+
+# getIPv6RangeFirstAddress: returns the first address of an IPv6 subnet. This is usually 
+# the network address (/127 and /128 subnets are an exception)
+#
+# Argument: IPv6 subnet
+#
+# Returns: first address / network address (as decimal integer value)
+#
+# This subroutine will exit with an error message if the argument is not a valid IPv6 subnet.
+#
+sub getIPv6RangeFirstAddress
+{	my ($arg) = @_;
+	my ($addr,$length) = split "\/", $arg;
+	if ( getVarType ($arg) == $TYPE_IPV6R )
+	{	my $result = convertIPv6AddressInt ($addr);
+		   $result = $result >> ( 128 - $length );
+		   $result = $result << ( 128 - $length );
+		return $result;
+	}	
+	else
+	{	print STDERR "Error: cannot determine first address for IPv6 range \"$arg\". Not a valid range.\n";
 		exit 1;
 	}
 }
@@ -550,26 +775,236 @@ sub getIPv4RangeFirstAddress
 #
 # Argument: IPv4 subnet, in CIDR notation. For instance: "10.11.12.0/24".
 #
-# Return value: last address / broadcast address
+# Returns: last address / broadcast address (as decimal integer value)
 #
 # This subroutine will exit with an error message if the argument is not a valid IPv4 subnet.
 #
 sub getIPv4RangeLastAddress
-{       my ($arg) =@_;
+{       my ($arg) = @_;
         if ( $arg =~ /^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/ )
-        {       my ($addr,$length) = ($1,$2);
+        {       my ( $addr, $length ) = ( $1, $2 );
 		if ( $length > 32 )
 		{	print STDERR "Error: specified prefix length for \"$arg\" is invalid.\n";
 			exit 1;
 		}
-                my $result = convertIPv4AddressInt ($addr);
-                   $result = $result >> ( 32 - $length);
-                   $result = $result << ( 32 - $length);
-		   $result += 2**(32-$length) -1;
+                my $result = convertIPv4AddressInt ( $addr );
+                   $result = $result >> ( 32 - $length );
+                   $result = $result << ( 32 - $length );
+		   $result += 2 ** ( 32 - $length ) -1;
                 return $result;
         }
         else
-        {       print STDERR "Error: cannot determine last address for IPv4-range \"$arg\".\n";
+        {       print STDERR "Error: cannot determine last address for IPv4-range \"$arg\". Not a valid range\n";
                 exit 1;
         }
+}
+
+# getIPv6RangeLastAddress: returns the last address of an IPv6 subnet
+#
+# Argument: IPv6 subnet
+#
+# Returns: last address (as decimal integer value)
+#
+# This subroutine will exit with an error message if the argument is not a valid IPv6 subnet.
+#
+sub getIPv6RangeLastAddress
+{	my ($arg) = @_; 
+	my ($addr,$length) = split "\/", $arg;
+	if ( getVarType ($arg) == $TYPE_IPV6R )
+	{       my $result = convertIPv6AddressInt ($addr);
+		$result = $result >> ( 128 - $length );
+		$result = $result << ( 128 - $length );
+		$result += 2 ** (128 - $length) - 1;
+		return $result;
+	}      
+	else
+	{       print STDERR "Error: cannot determine first address for IPv6 range \"$arg\". Not a valid range.\n";
+		exit 1;
+	}
+}
+
+
+# convertHexadecimalDecimal: converts a positive or negative hexadecimal number to a decimal number.
+#
+# Argument: Hexadecimal number
+#
+# Returns: Decimal number
+#
+# This subroutine will exit with an error mesage if the argument is not a valid hexadecimal number.
+#
+sub convertHexadecimalDecimal
+{	my ($input) = @_;
+
+	if ( $input !~ /^\-?[\da-f]+$/i )
+	{	print STDERR "Error: could not convert value \"$input\" from hexadecimal to decimal. Not a hexadecimal value.\n";
+		exit 1;
+	}
+
+	my $isNegative = 0;
+	if ( substr ($input,0,1) eq "-" )
+	{	$isNegative = 1;
+		$input = substr ($input,1,length($input)-1);
+	}
+
+	return ( $isNegative ? "-" : "" ) . Math::BigInt->from_hex ( "0x$input" );
+}
+
+# convertDecimalHexadecimal: converts a positive or negative decimal number to a hexadecimal number.
+#
+# Argument: Decimal number
+#
+# Returns: Hexadecimal value
+#
+# This subroutine will exit with an error message if the argument is not a valid decimal number.
+#
+sub convertDecimalHexadecimal
+{	my ($input) = @_;
+
+	if ( $input !~ /^\-?\d+$/ )
+	{	print STDERR "Error: could not convert value \"$input\" from decimal to hexadecimal. Not a decimal value.\n";
+		exit 1;
+	}
+
+	my $number = Math::BigInt->new($input);
+	my $result = $number->as_hex();
+	   $result =~ s/0x//;
+	return $result;
+}
+
+# convertIPv6AddressInt: converts an IPv6 address to a decimal value
+#
+# Argument: IPv6 address
+#
+# Returns: decimal value
+#
+# This subroutine will exit with an error message if the input value is not a valid IPv6 address
+sub convertIPv6AddressInt
+{	my ($input) = @_;
+	my $result = 0;
+	my $multiplier = 1;
+
+	# Check if input value is a valid IPv6 address.
+	if ( getVarType ($input) != $TYPE_IPV6 )
+	{	print STDERR "Error: could not convert value \"$input\" from IPv6 address to decimal. Not a valid IPv6 address.\n";
+		exit 1;
+	}
+
+	# Convert last part from IPv4 notation to normal IPv6 notation, if necessary.
+	if ( $input =~ /^([\da-f:]{2,29}):(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/ )
+	{       my ($ipv6Part,$ipv4Part) = ($1,$2);
+		my $ipv4Dec = convertIPv4AddressInt ($ipv4Part);
+		$input = $ipv6Part . ":" . 
+			convertDecimalHexadecimal ( $ipv4Dec >> 16  ) . ":" . 
+			convertDecimalHexadecimal ( $ipv4Dec - ( $ipv4Dec >> 16 << 16 ));
+	}
+
+	# Process "::" abbreviation, if any.
+	my $ddIndex = index ( $input, "::");
+	if ( $ddIndex >= 0 )
+	{       
+		# Calculate and check number of non-empty groups in address
+		my $nonEmptyGroups = scalar ( grep /[\da-f]+/, ( split /:{1,2}/ , $input ) );
+		
+		# Expand "::" to zero groups
+		my $repGroup = "0:" x ( 8 - $nonEmptyGroups ) ;
+		$repGroup = substr ( $repGroup, 0, length($repGroup) - 1 )
+			if $ddIndex == length( $input ) - 2;
+		$repGroup = ":$repGroup"
+		unless $ddIndex == 0;
+		$input =~ s/::/$repGroup/;
+	}
+
+	# Convert hexadecimal groups to decimal value
+	foreach my $ipv6Group ( reverse split ':', $input )
+	{	$result    += convertHexadecimalDecimal ($ipv6Group) * $multiplier;
+		$multiplier = $multiplier * 65536;
+	}
+
+	return $result;
+}
+
+# sub convertIntIPv6Adress: converts a decimal integer value to an IPv6 address
+#
+# Arguments:
+# 1. Decimal integer value
+# 2. Binary option: return full address, do not compress zero groups with "::"
+# 3. Binary option: use leading zeroes in address groups
+# 4. Binary option: represent last two groups as an IPv4 address
+#
+# Returns: IPv6 address
+# 
+# This subroutine will exit with an error if the input value cannot be converted to an IPv6 address
+#
+sub convertIntIPv6Address
+{	my ($input,$fullAddressOption,$leadingZeroOption,$ipv4NotationOption) = @_;
+
+	# Check if input is valid
+	if ( $input !~ /^\d+$/ or $input > 2**128 )
+	{	print STDERR "Error: cannon convert decimal value \"$input\" to IPv6 address. Not a number or out of range.\n";
+		exit 1;
+	}
+
+	# Determine group values 
+	my @groupValue = (0,0,0,0,0,0,0,0);
+	foreach my $groupIndex ( 0,1,2,3,4,5,6,7 )
+	{	$groupValue [$groupIndex] = convertDecimalHexadecimal ($input % 65536);
+		$input = $input >> 16;
+	}
+
+	# Reverse group order, so most significant group is first
+	@groupValue = reverse @groupValue;
+
+	# Determine which groups to compress, if necessary
+	my $firstCompress = -1;
+	my $lastCompress = -1;
+	my $maxCompressLength = 1;
+	if ( ! $fullAddressOption )
+	{	foreach my $groupIndex (0,1,2,3,4,5,6,7)
+		{	
+			# Count number of zero groups from every position
+			my $zeroGroupCount = 0;
+			foreach my $countIndex ( $groupIndex .. 7 )
+			{	if ( $groupValue[$countIndex] eq "0" )
+				{	$zeroGroupCount++;
+				}
+				else
+				{	last;
+				}	
+			}
+
+			# Check if number of zero groups is highest
+			if ( $zeroGroupCount > $maxCompressLength )
+			{	$firstCompress = $groupIndex;
+				$lastCompress  = $groupIndex + $zeroGroupCount - 1;
+				$maxCompressLength = $zeroGroupCount;
+			}
+		}		
+	}
+
+	# Compose IPv6 address
+	my $result = "";
+
+	foreach my $groupIndex (0,1,2,3,4,5,6,7)
+	{	if ( $firstCompress >= 0 and $firstCompress == $groupIndex )
+		{	$result .= "::";
+		}
+		elsif ( $firstCompress >=0 and $groupIndex > $firstCompress and $groupIndex <= $lastCompress)
+		{	next;
+		}
+		elsif ( $ipv4NotationOption and $groupIndex >= 6 )
+		{	next;
+		}
+		else
+		{	$result .= $leadingZeroOption ?
+				padInteger ($groupValue[$groupIndex],4) :
+				$groupValue[$groupIndex];
+			$result .= ":" unless $groupIndex == 7 or $firstCompress == $groupIndex + 1;
+		}
+	}
+
+	$result .= convertIntIPv4Address ( convertHexadecimalDecimal ( $groupValue[6] ) * 65536 +
+					   convertHexadecimalDecimal ( $groupValue[7] ) )
+		if $ipv4NotationOption;
+
+	return $result;
 }

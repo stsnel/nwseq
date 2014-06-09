@@ -1,0 +1,10 @@
+1.10:
+- Add support for hexadecimal integers
+- Add support for IPv6 addresses and IPv6 subnets
+- Use Getopt::Long module to parse command line arguments
+- Show error message if -i / --include-nb option is used in combination with incompatible command line arguments
+- Minor changes to man page and usage information
+- Add this CHANGELOG file
+
+1.00:
+- First version. Supports decimal integers, MAC addresses, IPv4 addresses and IPv4 subnets

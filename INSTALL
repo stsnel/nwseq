@@ -6,6 +6,6 @@ Installing nwseq should be easy:
   $ sudo install -m 0644 nwseq.8 /usr/local/man/man8
 
 If your Perl interpreter is not in /usr/bin, you will have to adjust the Perl interpreter path 
-on the first line of the script. For instance, if your Perl interpreter is in /usr/local/bin, 
+on the first line of the script. For instance, if your perl interpreter is in /usr/local/bin, 
 the first line of nwseq should be:
 #!/usr/local/bin/perl
