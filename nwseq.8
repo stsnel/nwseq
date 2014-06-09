@@ -34,20 +34,22 @@ IPV6PREFIX PREFIXLENGTH
 
 .SH DESCRIPTION
 
-nwseq prints a sequence of values (from FIRST to LAST, in steps of INCREMENT). The currently supported value types are: decimal integers, 
-hexadecimal integers, MAC addresses, IPv4 addresses and IPv6 addresses.
+nwseq prints a sequence of values (from FIRST to LAST, in steps of INCREMENT). The currently supported value types are: 
+decimal integers, hexadecimal integers, MAC addresses, IPv4 addresses and IPv6 addresses.
 
 MAC addresses should be in IEEE 802.3 format (e.g. 12-34-12-34-12-34 or 12:34:12:34:12:34) or 
 in Cisco format (e.g. 1234.1234.1234). 
 
-nwseq can also print all addresses in an IPv4/IPv6 subnet, or print a list of subnets with a specified prefix length within a larger IPv4/IPv6 subnet. Subnets should be in CIDR notation (e.g. 10.11.12.0/24). 
+nwseq can also print all addresses in an IPv4/IPv6 subnet, or print a list of subnets with a specified prefix length
+within a larger IPv4/IPv6 subnet. Subnets should be in CIDR notation (e.g. 10.11.12.0/24). 
 
 .SS OPTIONS
 
 Supported options:
 .TP
 \fB \-i \fP or \fB--include-nb \fP
-Includes the network address and (for IPv4 subnets) the broadcast address of the subnet in the output. This option can only be used on IPv4 or IPv6 subnets. 
+Includes the network address and (for IPv4 subnets) the broadcast address of the subnet in the output. This option 
+can only be used on IPv4 or IPv6 subnets. 
 
 .TP
 \fB -n \fP or \fB--no-compress \fP
@@ -60,7 +62,8 @@ with decimal or hexadecimal integer command line arguments.
 
 .TP
 \fB \-x \fP or \fB--hexadecimal \fP
-All numerical arguments are hexadecimal numbers. If this option is not specified, nwseq cannot process hexadecimal numerical arguments.
+All numerical arguments are hexadecimal numbers. If this option is not specified, nwseq cannot process hexadecimal 
+numerical arguments.
 
 .TP
 \fB \-z \fP or \fB--leading-zero \fP
