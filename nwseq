@@ -36,6 +36,8 @@ use warnings;
 use Getopt::Long;
 use Math::BigInt;
 
+require 5.8.9;
+
 my $inputIncrement = "";
 my $inputFirst = "";
 my $inputLast = "";
