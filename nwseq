@@ -129,7 +129,7 @@ if ( $usageOption )
 }
 
 if ( $versionOption )
-{	print "nwseq version $VERSION, using Perl version $^V\n";
+{	print "nwseq version $VERSION, using Perl version " . ( $^V ? $^V : $] ) . "\n";
 	exit 0;
 }
 
