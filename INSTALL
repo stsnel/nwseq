@@ -1,3 +1,8 @@
+nwseq is mainly intended to be used on Linux and other Unix-like operating systems. It runs on
+Windows with ActiveState ActivePerl too.  
+
+Using Perl 5.8.9 or better is highly recommended, because nwseq needs bignum, which breaks Getopt::Long 
+in some older versions of Perl. 
 
 Installing nwseq should be easy:
 - Just copy the nwseq script to a directory in the PATH and make it executable. For example:
@@ -6,6 +11,14 @@ Installing nwseq should be easy:
   $ sudo install -m 0644 nwseq.8 /usr/local/man/man8
 
 If your Perl interpreter is not in /usr/bin, you will have to adjust the Perl interpreter path 
-on the first line of the script. For instance, if your perl interpreter is in /usr/local/bin, 
+in the first line of the script. For instance, if your perl interpreter is in /usr/local/bin, 
 the first line of nwseq should be:
 #!/usr/local/bin/perl
+
+If you want to run the unit tests, you'll need the Perl module 'Test::Simple':
+- Install Perl CPAN, if it's not installed yet. For instance:
+  $ sudo yum install perl-CPAN
+- Start a CPAN-shell:
+  $ sudo perl -MCPAN -e shell
+- Install Test::Simple from the CPAN shell:
+  > install Test::Simple

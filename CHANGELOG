@@ -1,3 +1,9 @@
+1.11:
+- Improve error messages for invalid arguments.
+- Require Perl version 5.8.9 or better, because of problems with bignum in combination with Getopt::Long in
+  older Perl versions.
+- Minor changes to man page, usage information and INSTALL file
+
 1.10:
 - Add support for hexadecimal integers
 - Add support for IPv6 addresses and IPv6 subnets

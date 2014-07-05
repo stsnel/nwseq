@@ -71,7 +71,7 @@ my $MACFORMAT_IEEEHYPHEN 	= 0;		# e.g. 01-02-03-04-05-06
 my $MACFORMAT_IEEECOLON		= 1;		# e.g. 01:02:03:04:05:06
 my $MACFORMAT_CISCO		= 2;		# e.g. 0102.0304.0506
 
-my $VERSION = "1.10";
+my $VERSION = "1.11";
 
 my $usage = 
 "
