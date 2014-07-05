@@ -2,7 +2,7 @@
 #
 # nwseq is a utility which enumerates network addresses and integers.
 #
-# please use "nwseq --help" for usage information, or consult the man page
+# please use "nwseq --help" for basic usage information, or consult the man page
 # for examples and additional information.
 #
 # ----
@@ -96,7 +96,8 @@ Supported options:
  --help			Displays this help message
  --version		Displays version information
 
-For additional information and examples, please consult the man page.
+For additional information and examples, please consult the man page or the wiki page
+at https://github.com/stsnel/nwseq/wiki.
 ";
 
 # Parse command line options
@@ -128,32 +129,42 @@ if ( $usageOption )
 }
 
 if ( $versionOption )
-{	print "nwseq version $VERSION\n";
+{	print "nwseq version $VERSION, using Perl version $^V\n";
 	exit 0;
 }
 
-# Parse command line arguments
+# Check number of arguments
 
 if ( scalar @ARGV == 0 )
 {	print STDERR "Error: missing argument.\n";
 	exit 1;
 }
-elsif ( scalar @ARGV >= 1 and scalar @ARGV <= 3 )
-{	# The number of arguments is correct
-	$inputLast = $ARGV[scalar @ARGV - 1];		
-	$inputFirst = $ARGV[0] if scalar @ARGV > 1;		
-	$inputIncrement = $ARGV[1] if scalar @ARGV == 3;
-}
-else
-{	print STDERR "Error: too many arguments.\n";
-	exit 1;
+
+if ( scalar @ARGV > 3 )
+{       print STDERR "Error: too many arguments.\n";
+        exit 1;
 }
 
-# Process command line arguments
+# Parse all arguments
+my @argumentTypes = ();
+foreach my $argument (@ARGV)
+{	my $argumentType = getVarType ($argument);
 
-my $firstType = getVarType ($inputFirst);
-my $lastType  = getVarType ($inputLast);
-my $incType   = getVarType ($inputIncrement);
+	if ( $argumentType == $TYPE_UNKNOWN )
+	{	print STDERR "Error: cannot parse argument \"$argument\".\n";
+		exit 1;
+	}
+	else
+	{	push (@argumentTypes,$argumentType);
+	}
+}
+
+$inputLast = $ARGV[scalar @ARGV - 1];		
+$inputFirst = $ARGV[0] if scalar @ARGV > 1;		
+$inputIncrement = $ARGV[1] if scalar @ARGV == 3;
+my $firstType = scalar @ARGV > 1 ? $argumentTypes[0] : $TYPE_EMPTY;
+my $lastType  = $argumentTypes [ scalar @ARGV - 1];
+my $incType   = scalar @ARGV == 3 ? $argumentTypes[1] : $TYPE_EMPTY;
 
 if ( $incType == $TYPE_DECINT and ! $hexadecimalArguments )
 {	$increment = $inputIncrement;
@@ -166,15 +177,7 @@ elsif ( $incType != $TYPE_EMPTY )
 	exit 1;
 }
 
-if ( $firstType == $TYPE_UNKNOWN )
-{	print STDERR "Error: invalid argument \"$inputFirst\".\n";
-	exit 1;
-}
-elsif ( $lastType == $TYPE_UNKNOWN  )
-{	print STDERR "Error: invalid argument \"$inputLast\".\n";
-	exit 1;
-}
-elsif ( ( $firstType == $lastType and $firstType != $TYPE_HEXINT ) or
+if ( ( $firstType == $lastType and $firstType != $TYPE_HEXINT ) or
 	( $hexadecimalArguments and
 		( $firstType == $TYPE_DECINT or $firstType == $TYPE_HEXINT ) and
 		( $lastType == $TYPE_DECINT or $lastType == $TYPE_HEXINT )
