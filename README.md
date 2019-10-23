@@ -14,7 +14,7 @@ nwseq 10.0.0.250 10.0.1.10
 
 nwseq 0000.1000.2000 2 0000.1000.2010
 
-  Prints every other MAC addresses from 0000.1000.2000 to 0000.1000.2010.
+  Prints every other MAC address from 0000.1000.2000 to 0000.1000.2010.
 
 nwseq 10.0.0.0/29
 
